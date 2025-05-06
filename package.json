@@ -4,7 +4,7 @@
   "description": "Obsidian plugin that ranks Markdown files in a folder by editing effort using the EditNext essay-quality-ranker Python tool.",
   "main": "dist/main.js",
   "scripts": {
-    "build": "rollup -c"
+    "build": "rollup -c && cp dist/main.js ."
   },
   "keywords": [
     "obsidian",

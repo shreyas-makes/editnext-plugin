@@ -61,7 +61,7 @@ const DEFAULT_SETTINGS: EditNextPluginSettings = {
 // --------------------------------------------------
 // Helper to run external python process
 // --------------------------------------------------
-async function runRanker(app: App, settings: EditNextPluginSettings): Promise<string> {
+async function runRanker(app: App, plugin: EditNextPlugin, settings: EditNextPluginSettings): Promise<any> {
   return new Promise((resolve, reject) => {
     // Determine folder absolute path
     const vaultPath = app.vault.adapter.getBasePath();
@@ -80,13 +80,33 @@ async function runRanker(app: App, settings: EditNextPluginSettings): Promise<st
       return;
     }
 
-    // Compose command
-    const scriptPath = path.join(__dirname, '..', '..', 'editnext', 'essay-quality-ranker.py');
-    Logger.debug("Script path:", scriptPath);
+    // Try multiple possible script locations
+    const possibleScriptPaths = [
+      // Try in plugin's data directory (relative to plugin location)
+      path.join(plugin.manifest.dir, 'data', 'essay-quality-ranker.py'),
+      // Try in the vault root
+      path.join(vaultPath, 'essay-quality-ranker.py'),
+      // Try in current execution directory
+      path.join(process.cwd(), 'essay-quality-ranker.py'),
+      // Try in parent directory
+      path.join(process.cwd(), '..', 'essay-quality-ranker.py'),
+      // Path relative to the vault (assuming plugin is installed in .obsidian/plugins)
+      path.join(vaultPath, '.obsidian', 'plugins', 'editnext-plugin', 'data', 'essay-quality-ranker.py')
+    ];
+    
+    let scriptPath = null;
+    for (const tryPath of possibleScriptPaths) {
+      Logger.debug(`Checking script path: ${tryPath}`);
+      if (fs.existsSync(tryPath)) {
+        scriptPath = tryPath;
+        Logger.debug(`Found script at: ${scriptPath}`);
+        break;
+      }
+    }
     
     // Check if script exists
-    if (!fs.existsSync(scriptPath)) {
-      const error = `Script not found: ${scriptPath}`;
+    if (!scriptPath) {
+      const error = `Script not found in any of the expected locations. Please place essay-quality-ranker.py in your plugin's data folder or vault root.`;
       Logger.error(error);
       reject(new Error(error));
       return;
@@ -99,6 +119,7 @@ async function runRanker(app: App, settings: EditNextPluginSettings): Promise<st
       ...settings.weights.map((w) => w.toString()),
       '--model',
       settings.model,
+      '--json' // Always request JSON output
     ];
     
     Logger.debug("Command:", settings.pythonPath, cmdArgs.join(' '));
@@ -134,7 +155,15 @@ async function runRanker(app: App, settings: EditNextPluginSettings): Promise<st
       child.on('close', (code: number) => {
         Logger.debug(`Process exited with code ${code}`);
         if (code === 0) {
-          resolve(output);
+          try {
+            // Try to parse the JSON output
+            const results = JSON.parse(output);
+            resolve(results);
+          } catch (e) {
+            // Fallback to raw text if JSON parsing fails
+            Logger.warn("Failed to parse JSON output, returning raw text:", e);
+            resolve(output);
+          }
         } else {
           const error = `Process exited with code ${code}${errorOutput ? ': ' + errorOutput : ''}`;
           Logger.error(error);
@@ -153,6 +182,8 @@ async function runRanker(app: App, settings: EditNextPluginSettings): Promise<st
 // --------------------------------------------------
 export default class EditNextPlugin extends Plugin {
   settings: EditNextPluginSettings = DEFAULT_SETTINGS;
+  ribbonEl: HTMLElement | null = null;
+  statusBarItem: HTMLElement | null = null;
 
   async onload() {
     Logger.info('Loading EditNext Ranker plugin');
@@ -165,31 +196,35 @@ export default class EditNextPlugin extends Plugin {
       await this.loadSettings();
       Logger.debug("Settings loaded:", this.settings);
 
+      // Add ribbon icon
+      this.ribbonEl = this.addRibbonIcon('file-edit', 'EditNext Ranker', async () => {
+        this.runRankerCommand();
+      });
+
+      // Add status bar item (initially hidden)
+      this.statusBarItem = this.addStatusBarItem();
+      this.statusBarItem.addClass('editnext-status');
+      this.statusBarItem.style.display = 'none';
+
       // Register command
-      // @ts-ignore
       this.addCommand({
         id: 'editnext-rank-files',
         name: 'Rank files by editing effort',
         callback: async () => {
-          Logger.info('Running EditNext ranker command...');
-          new Notice('Running EditNext ranker...');
-          try {
-            const result = await runRanker(this.app, this.settings);
-            Logger.debug("Ranker completed successfully");
-            // Show output in a new pane
-            // @ts-ignore
-            const leaf = this.app.workspace.getLeaf(true);
-            await leaf.open(new EditNextResultView(leaf, result));
-          } catch (err) {
-            const errorMsg = (err as Error).message;
-            Logger.error("Ranker error:", err);
-            new Notice(`EditNext error: ${errorMsg}`);
-          }
+          this.runRankerCommand();
         },
+      });
+      
+      // Add command to update frontmatter
+      this.addCommand({
+        id: 'editnext-update-frontmatter',
+        name: 'Update current note with edit score',
+        editorCallback: async (editor, view) => {
+          await this.updateCurrentNoteFrontmatter(view);
+        }
       });
 
       // Add settings tab
-      // @ts-ignore
       this.addSettingTab(new EditNextSettingTab(this.app, this));
       
       Logger.info('EditNext Ranker plugin loaded successfully');
@@ -201,6 +236,221 @@ export default class EditNextPlugin extends Plugin {
 
   onunload() {
     Logger.info('Unloading EditNext Ranker plugin');
+    // Clear references
+    this.ribbonEl = null;
+    this.statusBarItem = null;
+  }
+  
+  async runRankerCommand() {
+    Logger.info('Running EditNext ranker command...');
+    new Notice('Running EditNext ranker...');
+    
+    // Show progress in status bar
+    if (this.statusBarItem) {
+      this.statusBarItem.setText('EditNext: Analyzing files...');
+      this.statusBarItem.style.display = 'block';
+    }
+    
+    try {
+      const results = await runRanker(this.app, this, this.settings);
+      Logger.debug("Ranker completed successfully");
+      
+      // Hide status bar item
+      if (this.statusBarItem) {
+        this.statusBarItem.style.display = 'none';
+      }
+      
+      // Store results in plugin instance for later use
+      if (Array.isArray(results)) {
+        await this.updateAllFrontmatter(results);
+      }
+      
+      // Show output in a new pane
+      const leaf = this.app.workspace.getLeaf(true);
+      await leaf.open(new EditNextResultView(leaf, results));
+      
+      // Show success notice with top file info
+      if (Array.isArray(results) && results.length > 0) {
+        const topFile = results[0];
+        const fileName = topFile.file.split(/[\/\\]/).pop();
+        new Notice(`Top edit priority: ${fileName} (score: ${topFile.composite_score.toFixed(1)})`);
+      }
+    } catch (err) {
+      // Hide status bar on error
+      if (this.statusBarItem) {
+        this.statusBarItem.style.display = 'none';
+      }
+      
+      const errorMsg = (err as Error).message;
+      Logger.error("Ranker error:", err);
+      new Notice(`EditNext error: ${errorMsg}`);
+    }
+  }
+  
+  async updateAllFrontmatter(results: RankerResult[]) {
+    try {
+      for (const result of results) {
+        await this.updateFileFrontmatter(result);
+      }
+      Logger.info(`Updated frontmatter for ${results.length} files`);
+    } catch (err) {
+      Logger.error("Error updating frontmatter:", err);
+    }
+  }
+  
+  async updateFileFrontmatter(result: RankerResult) {
+    try {
+      // Find the file in the vault
+      const files = this.app.vault.getFiles();
+      
+      // First try direct path match
+      let targetFile = files.find(f => f.path === result.file);
+      
+      // If not found, try just the filename
+      if (!targetFile) {
+        const fileName = result.file.split(/[\/\\]/).pop();
+        targetFile = files.find(f => f.name === fileName);
+      }
+      
+      if (!targetFile) {
+        Logger.warn(`File not found for frontmatter update: ${result.file}`);
+        return;
+      }
+      
+      // Read the file content
+      const content = await this.app.vault.read(targetFile);
+      
+      // Update or add frontmatter
+      const newContent = this.updateYamlFrontmatter(content, {
+        edit_score: result.composite_score,
+        llm_score: result.llm_score,
+        grammar_score: result.grammar_score,
+        readability_score: result.readability_score
+      });
+      
+      // Write back if changed
+      if (newContent !== content) {
+        await this.app.vault.modify(targetFile, newContent);
+        Logger.debug(`Updated frontmatter for ${targetFile.path}`);
+      }
+    } catch (err) {
+      Logger.error(`Error updating frontmatter for ${result.file}:`, err);
+    }
+  }
+  
+  async updateCurrentNoteFrontmatter(view: any) {
+    if (!view || !view.file) {
+      new Notice("No active file");
+      return;
+    }
+    
+    try {
+      // Get current file
+      const file = view.file;
+      
+      // Run ranker just for this file
+      const vaultPath = this.app.vault.adapter.getBasePath();
+      const filePath = path.join(vaultPath, file.path);
+      const dirPath = path.dirname(filePath);
+      
+      new Notice(`Analyzing ${file.name}...`);
+      
+      // Override target folder to only score this one file
+      const originalFolder = this.settings.targetFolder;
+      this.settings.targetFolder = path.relative(vaultPath, dirPath);
+      
+      // Run ranker
+      const results = await runRanker(this.app, this, this.settings);
+      
+      // Restore original setting
+      this.settings.targetFolder = originalFolder;
+      
+      if (Array.isArray(results) && results.length > 0) {
+        // Find this file in results
+        const result = results.find(r => {
+          const resultName = r.file.split(/[\/\\]/).pop();
+          return resultName === file.name;
+        });
+        
+        if (result) {
+          await this.updateFileFrontmatter(result);
+          new Notice(`Updated edit scores for ${file.name}`);
+        } else {
+          new Notice(`Could not find analysis results for ${file.name}`);
+        }
+      } else {
+        new Notice("No results returned from analysis");
+      }
+    } catch (err) {
+      Logger.error("Error updating current note:", err);
+      new Notice(`Error: ${(err as Error).message}`);
+    }
+  }
+  
+  updateYamlFrontmatter(content: string, data: Record<string, any>): string {
+    // Regular expressions for frontmatter detection
+    const yamlRegex = /^---\n([\s\S]*?)\n---\n/;
+    const match = content.match(yamlRegex);
+    
+    if (match) {
+      // Frontmatter exists, parse it
+      try {
+        const yamlContent = match[1];
+        // Basic YAML parsing/manipulation without external dependencies
+        let frontmatter = {};
+        const lines = yamlContent.split('\n');
+        for (const line of lines) {
+          const keyValue = line.split(':');
+          if (keyValue.length >= 2) {
+            const key = keyValue[0].trim();
+            const value = keyValue.slice(1).join(':').trim();
+            if (key && value) {
+              frontmatter[key] = value;
+            }
+          }
+        }
+        
+        // Update with new data
+        frontmatter = { ...frontmatter, ...data };
+        
+        // Serialize back to YAML
+        let newYaml = '---\n';
+        for (const [key, value] of Object.entries(frontmatter)) {
+          // Format numbers nicely
+          const formattedValue = typeof value === 'number' ? 
+            Number.isInteger(value) ? value : value.toFixed(1) : 
+            value;
+          newYaml += `${key}: ${formattedValue}\n`;
+        }
+        newYaml += '---\n';
+        
+        // Replace old frontmatter
+        return content.replace(yamlRegex, newYaml);
+      } catch (e) {
+        Logger.error("Error parsing frontmatter:", e);
+        // If parsing fails, append new frontmatter properties
+        let newYaml = match[0];
+        for (const [key, value] of Object.entries(data)) {
+          const formattedValue = typeof value === 'number' ? 
+            Number.isInteger(value) ? value : value.toFixed(1) : 
+            value;
+          // Insert before the closing ---
+          newYaml = newYaml.replace(/---\n$/, `${key}: ${formattedValue}\n---\n`);
+        }
+        return content.replace(yamlRegex, newYaml);
+      }
+    } else {
+      // No frontmatter, add new one
+      let newYaml = '---\n';
+      for (const [key, value] of Object.entries(data)) {
+        const formattedValue = typeof value === 'number' ? 
+          Number.isInteger(value) ? value : value.toFixed(1) : 
+          value;
+        newYaml += `${key}: ${formattedValue}\n`;
+      }
+      newYaml += '---\n\n';
+      return newYaml + content;
+    }
   }
 
   async loadSettings() {
@@ -225,17 +475,36 @@ export default class EditNextPlugin extends Plugin {
 }
 
 // --------------------------------------------------
-// View to display results (simple markdown view)
+// View to display results (interactive dashboard)
 // --------------------------------------------------
-import { ItemView, WorkspaceLeaf } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, MarkdownRenderer } from 'obsidian';
 const VIEW_TYPE = 'editnext-results';
 
-class EditNextResultView extends ItemView {
-  resultText: string;
+interface RankerResult {
+  file: string;
+  composite_score: number;
+  llm_score: number;
+  grammar_score: number;
+  readability_score: number;
+  notes: string;
+}
 
-  constructor(leaf: WorkspaceLeaf, text: string) {
+class EditNextResultView extends ItemView {
+  results: RankerResult[] | null = null;
+  resultText: string = '';
+  isJsonData: boolean = false;
+
+  constructor(leaf: WorkspaceLeaf, data: any) {
     super(leaf);
-    this.resultText = text;
+    
+    if (Array.isArray(data)) {
+      this.results = data as RankerResult[];
+      this.isJsonData = true;
+    } else {
+      // Fallback for plain text results
+      this.resultText = String(data);
+      this.isJsonData = false;
+    }
   }
 
   getViewType() {
@@ -243,18 +512,240 @@ class EditNextResultView extends ItemView {
   }
 
   getDisplayText() {
-    return 'EditNext Results';
+    return 'EditNext Dashboard';
+  }
+
+  getIcon() {
+    return 'file-edit';
   }
 
   async onOpen() {
     const container = this.containerEl.children[1];
     container.empty();
-    const pre = container.createEl('pre');
-    pre.style.whiteSpace = 'pre-wrap';
-    pre.setText(this.resultText);
+    container.addClass('editnext-dashboard');
+    
+    // Add custom styles
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
+      .editnext-dashboard {
+        padding: 20px;
+      }
+      .editnext-header {
+        margin-bottom: 20px;
+      }
+      .editnext-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .editnext-table th {
+        text-align: left;
+        padding: 8px;
+        border-bottom: 2px solid var(--background-modifier-border);
+        font-weight: bold;
+        cursor: pointer;
+      }
+      .editnext-table td {
+        padding: 8px;
+        border-bottom: 1px solid var(--background-modifier-border);
+      }
+      .editnext-file-link {
+        cursor: pointer;
+        color: var(--text-accent);
+        text-decoration: none;
+      }
+      .editnext-file-link:hover {
+        text-decoration: underline;
+      }
+      .editnext-row-high {
+        background-color: rgba(255, 100, 100, 0.1);
+      }
+      .editnext-row-medium {
+        background-color: rgba(255, 200, 0, 0.1);
+      }
+      .editnext-row-low {
+        background-color: rgba(100, 255, 100, 0.1);
+      }
+      .editnext-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.8em;
+        font-weight: bold;
+      }
+      .editnext-badge-high {
+        background-color: rgba(255, 100, 100, 0.2);
+        color: #d32f2f;
+      }
+      .editnext-badge-medium {
+        background-color: rgba(255, 200, 0, 0.2);
+        color: #f57c00;
+      }
+      .editnext-badge-low {
+        background-color: rgba(100, 255, 100, 0.2);
+        color: #388e3c;
+      }
+    `;
+    container.prepend(styleEl);
+    
+    // Header
+    const header = container.createEl('div', { cls: 'editnext-header' });
+    header.createEl('h2', { text: 'EditNext Dashboard' });
+    
+    if (this.isJsonData && this.results) {
+      this.renderInteractiveTable(container);
+    } else {
+      // Fallback to plain text display
+      const pre = container.createEl('pre');
+      pre.style.whiteSpace = 'pre-wrap';
+      pre.setText(this.resultText);
+    }
+  }
+  
+  async renderInteractiveTable(container: HTMLElement) {
+    if (!this.results || this.results.length === 0) {
+      container.createEl('p', { text: 'No results found.' });
+      return;
+    }
+    
+    // Create table
+    const table = container.createEl('table', { cls: 'editnext-table' });
+    
+    // Table header
+    const thead = table.createEl('thead');
+    const headerRow = thead.createEl('tr');
+    
+    // Add headers with sort functionality
+    const headers = [
+      { key: 'file', text: 'File' },
+      { key: 'composite_score', text: 'Score' },
+      { key: 'llm_score', text: 'LLM' },
+      { key: 'grammar_score', text: 'Grammar' },
+      { key: 'readability_score', text: 'Readability' },
+      { key: 'notes', text: 'Notes' }
+    ];
+    
+    for (const header of headers) {
+      const th = headerRow.createEl('th');
+      th.setText(header.text);
+      th.dataset.key = header.key;
+      
+      // Add click handler for sorting
+      th.addEventListener('click', () => {
+        this.sortResults(header.key);
+        this.refreshTable(table);
+      });
+    }
+    
+    // Table body
+    const tbody = table.createEl('tbody');
+    this.populateTableRows(tbody);
+  }
+  
+  populateTableRows(tbody: HTMLElement) {
+    if (!this.results) return;
+    
+    tbody.empty();
+    
+    for (const result of this.results) {
+      const row = tbody.createEl('tr');
+      
+      // Add row class based on score
+      if (result.composite_score >= 70) {
+        row.addClass('editnext-row-high');
+      } else if (result.composite_score >= 40) {
+        row.addClass('editnext-row-medium');
+      } else {
+        row.addClass('editnext-row-low');
+      }
+      
+      // File cell with clickable link
+      const fileCell = row.createEl('td');
+      const fileLink = fileCell.createEl('a', { 
+        cls: 'editnext-file-link',
+        text: this.getFileName(result.file)
+      });
+      
+      fileLink.addEventListener('click', async () => {
+        await this.openFile(result.file);
+      });
+      
+      // Score with colored badge
+      const scoreCell = row.createEl('td');
+      const scoreBadge = scoreCell.createEl('span', {
+        cls: `editnext-badge ${this.getScoreClass(result.composite_score)}`,
+        text: result.composite_score.toFixed(1)
+      });
+      
+      // Other metrics
+      row.createEl('td', { text: result.llm_score.toString() });
+      row.createEl('td', { text: result.grammar_score.toFixed(1) });
+      row.createEl('td', { text: result.readability_score.toFixed(1) });
+      row.createEl('td', { text: result.notes });
+    }
+  }
+  
+  sortResults(key: string) {
+    if (!this.results) return;
+    
+    const isNumeric = key !== 'file' && key !== 'notes';
+    
+    this.results.sort((a, b) => {
+      if (isNumeric) {
+        return b[key] - a[key]; // Descending for numeric
+      } else {
+        return String(a[key]).localeCompare(String(b[key])); // Ascending for text
+      }
+    });
+  }
+  
+  refreshTable(table: HTMLElement) {
+    const tbody = table.querySelector('tbody');
+    if (tbody) {
+      this.populateTableRows(tbody);
+    }
+  }
+  
+  getFileName(path: string): string {
+    const parts = path.split(/[\/\\]/);
+    return parts[parts.length - 1];
+  }
+  
+  getScoreClass(score: number): string {
+    if (score >= 70) return 'editnext-badge-high';
+    if (score >= 40) return 'editnext-badge-medium';
+    return 'editnext-badge-low';
+  }
+  
+  async openFile(filePath: string) {
+    try {
+      // Find the file in the vault
+      const files = this.app.vault.getFiles();
+      let targetFile: TFile | null = null;
+      
+      // First try direct path match
+      targetFile = files.find(f => f.path === filePath) || null;
+      
+      // If not found, try the filename
+      if (!targetFile) {
+        const fileName = this.getFileName(filePath);
+        targetFile = files.find(f => f.name === fileName) || null;
+      }
+      
+      if (targetFile) {
+        // Open the file in a new leaf
+        await this.app.workspace.getLeaf(false).openFile(targetFile);
+      } else {
+        new Notice(`File not found: ${filePath}`);
+      }
+    } catch (err) {
+      Logger.error("Error opening file:", err);
+      new Notice(`Error opening file: ${err.message}`);
+    }
   }
 
-  async onClose() {}
+  async onClose() {
+    // Clean up
+  }
 }
 
 // --------------------------------------------------

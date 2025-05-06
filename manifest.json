@@ -5,7 +5,7 @@
   "minAppVersion": "1.5.0",
   "description": "Rank markdown files by editing effort using OpenAI and readability analysis.",
   "author": "EditNext AI",
-  "authorUrl": "https://github.com/yourrepo",
+  "authorUrl": "https://github.com/shreyas-makes/editnext-plugin",
   "isDesktopOnly": false,
-  "main": "dist/main.js"
+  "main": "main.js"
 } 
