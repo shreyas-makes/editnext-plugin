@@ -3,7 +3,7 @@
   "name": "EditNext Ranker",
   "version": "0.1.0",
   "minAppVersion": "1.5.0",
-  "description": "Rank markdown files by editing effort using OpenAI and readability analysis.",
+  "description": "Use AI to identify which documents need editing most. Prioritize your writing workflow based on editing effort scores.",
   "author": "EditNext AI",
   "authorUrl": "https://github.com/shreyas-makes/editnext-plugin",
   "isDesktopOnly": false,
