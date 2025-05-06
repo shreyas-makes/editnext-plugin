@@ -1,0 +1,11 @@
+{
+  "id": "editnext-plugin",
+  "name": "EditNext Ranker",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Rank markdown files by editing effort using OpenAI and readability analysis.",
+  "author": "EditNext AI",
+  "authorUrl": "https://github.com/yourrepo",
+  "isDesktopOnly": false,
+  "main": "dist/main.js"
+} 
