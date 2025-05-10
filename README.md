@@ -4,14 +4,14 @@ Transform your writing workflow by intelligently prioritizing your drafts. EditN
 
 ![EditNext Ranker Screenshot](https://raw.githubusercontent.com/shreyas-makes/editnext-plugin/main/assets/editnext-screenshot.png)
 
-## 🚀 Why EditNext?
+## Why EditNext?
 
 - **Save time** by immediately identifying which drafts need the most work
 - **Improve your writing** with concrete feedback on each document's weaknesses
 - **Track your progress** as your documents improve with each editing session
 - **Leverage AI insights** without leaving your Obsidian environment
 
-## ✨ Features
+## Features
 
 - **Smart Document Analysis** using OpenAI and advanced readability metrics
 - **Comprehensive Scoring System** that evaluates:

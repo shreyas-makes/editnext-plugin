@@ -75,11 +75,25 @@ def grammar_error_score(text: str) -> float:
 def readability_score(text: str) -> float:
     """Return 0‑100 scaled readability score based on FK grade > 8."""
     try:
-        grade = textstat.flesch_kincaid_grade(text)
-    except Exception:
-        grade = 12.0
-    gap = max(grade - 8, 0)  # grades above 8 need more editing
-    return max(min(gap * 10, 100), 0)
+        # Calculate multiple readability metrics for a more robust score
+        fk_grade = textstat.flesch_kincaid_grade(text)
+        flesch_score = textstat.flesch_reading_ease(text)
+        
+        # Convert Flesch Reading Ease (0-100) to a 0-100 score where higher means more difficult
+        # (Flesch Reading Ease is reverse scaled - higher means easier)
+        flesch_inverted = max(0, min(100, 100 - flesch_score))
+        
+        # Combine metrics (FK grade level above 8 + inverted Flesch score)
+        grade_component = max(fk_grade - 8, 0) * 10  # Each grade level above 8 is worth 10 points
+        
+        # Calculate final score as weighted average
+        final_score = (grade_component * 0.6) + (flesch_inverted * 0.4)
+        
+        # Ensure score is between 0-100
+        return max(min(final_score, 100), 0)
+    except Exception as e:
+        print(f"Error calculating readability: {str(e)}")
+        return 50.0  # Default to middle value on error
 
 def llm_edit_score(text: str, model: str = "gpt-4o-mini") -> Tuple[int, str]:
     """Query OpenAI to get an edit effort score (0-100) and a short note."""
@@ -202,9 +216,14 @@ def main():
     parser.add_argument("--weights", nargs=3, type=float, metavar=("LLM", "GRAM", "READ"), default=(0.6, 0.2, 0.2))
     parser.add_argument("--model", default="gpt-4o-mini", help="OpenAI model name")
     parser.add_argument("--json", action="store_true", help="Output results as JSON instead of a table")
+    parser.add_argument("--exclude-folders", "-e", nargs="*", default=[], help="Subfolder names to exclude (relative to folder)")
     args = parser.parse_args()
 
     md_files: List[Path] = list(args.folder.glob("**/*.md"))
+    # Exclude specified subfolders if any
+    if args.exclude_folders:
+        exclude_paths = [args.folder / excl for excl in args.exclude_folders]
+        md_files = [p for p in md_files if not any(excl_path in p.parents for excl_path in exclude_paths)]
     if not md_files:
         sys.exit("No .md files found in the specified folder.")
 

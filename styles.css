@@ -1,0 +1,212 @@
+/* EditNext Ranker for Obsidian Styles */
+
+.editnext-dashboard {
+  padding: 24px;
+  max-width: 900px;
+  margin: 0 auto;
+  font-family: var(--font-text);
+}
+
+.editnext-header {
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 16px;
+}
+
+.editnext-header h2 {
+  font-size: 1.8em;
+  font-weight: 500;
+  margin: 0;
+  color: var(--text-normal);
+}
+
+.editnext-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+  margin-top: 16px;
+}
+
+.editnext-table th {
+  text-align: left;
+  padding: 12px 8px;
+  border-bottom: 2px solid var(--background-modifier-border);
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-normal);
+  transition: background-color 0.2s;
+}
+
+.editnext-table th:hover {
+  color: var(--text-accent);
+  background-color: var(--background-modifier-hover);
+}
+
+.editnext-header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.editnext-sort-indicator {
+  margin-left: 6px;
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
+.editnext-table td {
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  vertical-align: middle;
+}
+
+.editnext-table tr:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.editnext-file-link {
+  cursor: pointer;
+  color: var(--text-accent);
+  text-decoration: none;
+}
+
+.editnext-file-link:hover {
+  text-decoration: underline;
+}
+
+.editnext-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 0.85em;
+  font-weight: 500;
+  text-align: center;
+  min-width: 40px;
+}
+
+.editnext-badge-high {
+  background-color: rgba(255, 100, 100, 0.2);
+  color: #d32f2f;
+}
+
+.editnext-badge-medium {
+  background-color: rgba(255, 200, 0, 0.2);
+  color: #f57c00;
+}
+
+.editnext-badge-low {
+  background-color: rgba(100, 255, 100, 0.2);
+  color: #388e3c;
+}
+
+.editnext-row-high {
+  background-color: rgba(255, 100, 100, 0.05);
+}
+
+.editnext-row-medium {
+  background-color: rgba(255, 200, 0, 0.05);
+}
+
+.editnext-row-low {
+  background-color: rgba(100, 255, 100, 0.05);
+}
+
+/* Tooltip styling for readability explanations */
+.editnext-tooltip {
+  position: relative;
+  display: inline-block;
+  cursor: help;
+}
+
+.editnext-tooltip:hover .editnext-tooltip-text {
+  visibility: visible;
+  opacity: 1;
+}
+
+.editnext-tooltip-text {
+  visibility: hidden;
+  width: 280px;
+  background-color: var(--background-secondary);
+  color: var(--text-normal);
+  text-align: left;
+  border-radius: 6px;
+  padding: 12px;
+  position: absolute;
+  z-index: 10;
+  bottom: 125%;
+  left: 50%;
+  margin-left: -140px;
+  opacity: 0;
+  transition: opacity 0.3s, visibility 0.3s;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  font-size: 0.85em;
+  line-height: 1.5;
+  pointer-events: none;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.editnext-tooltip-text::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -8px;
+  border-width: 8px;
+  border-style: solid;
+  border-color: var(--background-secondary) transparent transparent transparent;
+}
+
+/* Score color styling */
+.editnext-score-high {
+  color: var(--text-error);
+  font-weight: 600;
+}
+
+.editnext-score-medium {
+  color: var(--text-warning);
+  font-weight: 600;
+}
+
+.editnext-score-low {
+  color: var(--text-success);
+  font-weight: 600;
+}
+
+/* New readability score styling */
+.editnext-readability-high {
+  color: var(--text-error);
+  font-weight: 600;
+}
+
+.editnext-readability-medium {
+  color: var(--text-warning);
+  font-weight: 600;
+}
+
+.editnext-readability-low {
+  color: var(--text-success);
+  font-weight: 600;
+}
+
+.editnext-status {
+  padding: 4px 8px;
+  font-size: 0.85em;
+}
+
+.editnext-empty-state {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 1.1em;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  margin-top: 20px;
+}
+
+.editnext-settings-section {
+  margin-bottom: 24px;
+}
+
+.editnext-settings-section h3 {
+  margin-bottom: 12px;
+} 

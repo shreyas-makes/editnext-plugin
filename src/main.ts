@@ -48,6 +48,7 @@ interface EditNextPluginSettings {
   weights: [number, number, number];
   model: string;
   targetFolder: string; // relative to vault root
+  excludeFolders: string[];
 }
 
 const DEFAULT_SETTINGS: EditNextPluginSettings = {
@@ -56,6 +57,7 @@ const DEFAULT_SETTINGS: EditNextPluginSettings = {
   weights: [0.6, 0.2, 0.2],
   model: 'gpt-4o-mini',
   targetFolder: '',
+  excludeFolders: [],
 };
 
 // --------------------------------------------------
@@ -122,6 +124,12 @@ async function runRanker(app: App, plugin: EditNextPlugin, settings: EditNextPlu
       '--json' // Always request JSON output
     ];
     
+    // Include exclude folders if specified
+    if (settings.excludeFolders && settings.excludeFolders.length > 0) {
+      cmdArgs.push('--exclude-folders', ...settings.excludeFolders);
+      Logger.debug('Excluding folders:', settings.excludeFolders);
+    }
+    
     Logger.debug("Command:", settings.pythonPath, cmdArgs.join(' '));
 
     // Provide environment
@@ -158,6 +166,10 @@ async function runRanker(app: App, plugin: EditNextPlugin, settings: EditNextPlu
           try {
             // Try to parse the JSON output
             const results = JSON.parse(output);
+            // Sort results by composite_score descending
+            if (Array.isArray(results)) {
+              (results as RankerResult[]).sort((a, b) => b.composite_score - a.composite_score);
+            }
             resolve(results);
           } catch (e) {
             // Fallback to raw text if JSON parsing fails
@@ -242,9 +254,8 @@ export default class EditNextPlugin extends Plugin {
   }
   
   async runRankerCommand() {
-    Logger.info('Running EditNext ranker command...');
-    new Notice('Running EditNext ranker...');
-    
+    // Show persistent callout for processing
+    const processingNotice = new Notice('⏳ Running EditNext ranker...', 0);
     // Show progress in status bar
     if (this.statusBarItem) {
       this.statusBarItem.setText('EditNext: Analyzing files...');
@@ -253,12 +264,12 @@ export default class EditNextPlugin extends Plugin {
     
     try {
       const results = await runRanker(this.app, this, this.settings);
-      Logger.debug("Ranker completed successfully");
-      
       // Hide status bar item
       if (this.statusBarItem) {
         this.statusBarItem.style.display = 'none';
       }
+      // Hide processing callout on success
+      processingNotice.hide();
       
       // Store results in plugin instance for later use
       if (Array.isArray(results)) {
@@ -280,6 +291,8 @@ export default class EditNextPlugin extends Plugin {
       if (this.statusBarItem) {
         this.statusBarItem.style.display = 'none';
       }
+      // Hide processing callout on error
+      processingNotice.hide();
       
       const errorMsg = (err as Error).message;
       Logger.error("Ranker error:", err);
@@ -829,6 +842,23 @@ class EditNextSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.targetFolder)
           .onChange(async (value) => {
             this.plugin.settings.targetFolder = value.trim();
+            await this.plugin.saveSettings();
+          })
+      );
+
+    // Exclude subfolders setting
+    new Setting(containerEl)
+      .setName('Exclude Subfolders')
+      .setDesc('Comma-separated list of subfolders (relative to vault) to exclude')
+      .addText((text) =>
+        text
+          .setPlaceholder('drafts/old,archive')
+          .setValue(this.plugin.settings.excludeFolders.join(','))
+          .onChange(async (value) => {
+            this.plugin.settings.excludeFolders = value
+              .split(',')
+              .map((s) => s.trim())
+              .filter((s) => s);
             await this.plugin.saveSettings();
           })
       );
