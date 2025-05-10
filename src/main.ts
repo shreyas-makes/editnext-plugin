@@ -49,6 +49,7 @@ interface EditNextPluginSettings {
   model: string;
   targetFolder: string; // relative to vault root
   excludeFolders: string[];
+  dashboardAsHomePage: boolean; // whether to show dashboard as home page
 }
 
 const DEFAULT_SETTINGS: EditNextPluginSettings = {
@@ -58,6 +59,7 @@ const DEFAULT_SETTINGS: EditNextPluginSettings = {
   model: 'gpt-4o-mini',
   targetFolder: '',
   excludeFolders: [],
+  dashboardAsHomePage: false,
 };
 
 // --------------------------------------------------
@@ -126,7 +128,8 @@ async function runRanker(app: App, plugin: EditNextPlugin, settings: EditNextPlu
     
     // Include exclude folders if specified
     if (settings.excludeFolders && settings.excludeFolders.length > 0) {
-      cmdArgs.push('--exclude-folders', ...settings.excludeFolders);
+      cmdArgs.push('--exclude-folders');
+      cmdArgs.push(...settings.excludeFolders);
       Logger.debug('Excluding folders:', settings.excludeFolders);
     }
     
@@ -166,9 +169,9 @@ async function runRanker(app: App, plugin: EditNextPlugin, settings: EditNextPlu
           try {
             // Try to parse the JSON output
             const results = JSON.parse(output);
-            // Sort results by composite_score descending
+            // Sort results by composite_score ascending (lowest first)
             if (Array.isArray(results)) {
-              (results as RankerResult[]).sort((a, b) => b.composite_score - a.composite_score);
+              (results as RankerResult[]).sort((a, b) => a.composite_score - b.composite_score);
             }
             resolve(results);
           } catch (e) {
@@ -196,6 +199,7 @@ export default class EditNextPlugin extends Plugin {
   settings: EditNextPluginSettings = DEFAULT_SETTINGS;
   ribbonEl: HTMLElement | null = null;
   statusBarItem: HTMLElement | null = null;
+  dashboardFilename: string = 'editnext-dashboard.md';
 
   async onload() {
     Logger.info('Loading EditNext Ranker plugin');
@@ -236,8 +240,37 @@ export default class EditNextPlugin extends Plugin {
         }
       });
 
+      // Add command to open dashboard
+      this.addCommand({
+        id: 'editnext-open-dashboard',
+        name: 'Open EditNext Dashboard',
+        callback: async () => {
+          await this.openDashboard();
+        },
+      });
+
       // Add settings tab
       this.addSettingTab(new EditNextSettingTab(this.app, this));
+
+      // Register for layout ready event to handle home page
+      this.app.workspace.onLayoutReady(() => {
+        if (this.settings.dashboardAsHomePage) {
+          // Try to open the markdown dashboard file
+          const dashboardFile = this.app.vault.getAbstractFileByPath(this.dashboardFilename);
+          if (dashboardFile) {
+            // Only open if no other leaves are open
+            if (this.app.workspace.getLeavesOfType('markdown').length === 0) {
+              const leaf = this.app.workspace.getLeaf('tab');
+              leaf.openFile(dashboardFile as TFile);
+            }
+          } else {
+            // Fallback to generating new dashboard
+            if (this.app.workspace.getLeavesOfType('markdown').length === 0) {
+              this.openDashboard();
+            }
+          }
+        }
+      });
       
       Logger.info('EditNext Ranker plugin loaded successfully');
     } catch (err) {
@@ -263,29 +296,14 @@ export default class EditNextPlugin extends Plugin {
     }
     
     try {
-      const results = await runRanker(this.app, this, this.settings);
+      await this.openDashboard();
+      
       // Hide status bar item
       if (this.statusBarItem) {
         this.statusBarItem.style.display = 'none';
       }
       // Hide processing callout on success
       processingNotice.hide();
-      
-      // Store results in plugin instance for later use
-      if (Array.isArray(results)) {
-        await this.updateAllFrontmatter(results);
-      }
-      
-      // Show output in a new pane
-      const leaf = this.app.workspace.getLeaf(true);
-      await leaf.open(new EditNextResultView(leaf, results));
-      
-      // Show success notice with top file info
-      if (Array.isArray(results) && results.length > 0) {
-        const topFile = results[0];
-        const fileName = topFile.file.split(/[\/\\]/).pop();
-        new Notice(`Top edit priority: ${fileName} (score: ${topFile.composite_score.toFixed(1)})`);
-      }
     } catch (err) {
       // Hide status bar on error
       if (this.statusBarItem) {
@@ -471,6 +489,12 @@ export default class EditNextPlugin extends Plugin {
       const savedData = await this.loadData();
       Logger.debug("Loaded saved data:", savedData);
       this.settings = Object.assign({}, DEFAULT_SETTINGS, savedData);
+      
+      // Ensure excludeFolders is initialized as an array
+      if (!Array.isArray(this.settings.excludeFolders)) {
+        this.settings.excludeFolders = [];
+        await this.saveSettings();
+      }
     } catch (err) {
       Logger.error("Failed to load settings:", err);
       this.settings = { ...DEFAULT_SETTINGS };
@@ -483,6 +507,81 @@ export default class EditNextPlugin extends Plugin {
       Logger.debug("Settings saved successfully");
     } catch (err) {
       Logger.error("Failed to save settings:", err);
+    }
+  }
+
+  // Helper method to save dashboard as markdown
+  async saveDashboardToMarkdown(results: RankerResult[]) {
+    try {
+      if (!results || results.length === 0) {
+        return;
+      }
+
+      let content = '---\nalias: [EditNext Dashboard]\n---\n\n';
+      content += '# 📝 EditNext Dashboard\n\n';
+      content += '_Last updated: ' + new Date().toLocaleString() + '_\n\n';
+      
+      // Add table headers
+      content += '| File | Score | LLM | Grammar | Readability | Notes |\n';
+      content += '|------|-------|-----|---------|-------------|-------|\n';
+      
+      // Add table rows
+      for (const result of results) {
+        const fileName = result.file.split(/[\/\\]/).pop();
+        const score = result.composite_score.toFixed(1);
+        const llm = result.llm_score.toString();
+        const grammar = result.grammar_score.toFixed(1);
+        const readability = result.readability_score.toFixed(1);
+        const notes = result.notes || '';
+        
+        // Create a wiki-link to the file
+        const fileLink = `[[${fileName}]]`;
+        
+        content += `| ${fileLink} | ${score} | ${llm} | ${grammar} | ${readability} | ${notes} |\n`;
+      }
+
+      // Save the file
+      const file = this.app.vault.getAbstractFileByPath(this.dashboardFilename);
+      if (file) {
+        await this.app.vault.modify(file, content);
+      } else {
+        await this.app.vault.create(this.dashboardFilename, content);
+      }
+
+      Logger.debug('Dashboard saved as markdown file');
+    } catch (err) {
+      Logger.error('Error saving dashboard to markdown:', err);
+      throw err;
+    }
+  }
+
+  // Helper method to open dashboard
+  async openDashboard() {
+    try {
+      // Run the ranker to get fresh results
+      const results = await runRanker(this.app, this, this.settings);
+      
+      // Update frontmatter if we have results
+      if (Array.isArray(results)) {
+        await this.updateAllFrontmatter(results);
+        // Save dashboard as markdown
+        await this.saveDashboardToMarkdown(results);
+      }
+      
+      // Try to open the markdown file if it exists
+      const dashboardFile = this.app.vault.getAbstractFileByPath(this.dashboardFilename);
+      if (dashboardFile && this.settings.dashboardAsHomePage) {
+        const leaf = this.app.workspace.getLeaf('tab');
+        await leaf.openFile(dashboardFile as TFile);
+      } else {
+        // Fallback to the view if file doesn't exist or setting is disabled
+        const existingLeaf = this.app.workspace.getLeavesOfType(VIEW_TYPE)[0];
+        const leaf = existingLeaf || this.app.workspace.getLeaf('tab');
+        await leaf.open(new EditNextResultView(leaf, results));
+      }
+    } catch (err) {
+      Logger.error("Error opening dashboard:", err);
+      new Notice(`Error opening dashboard: ${(err as Error).message}`);
     }
   }
 }
@@ -525,7 +624,7 @@ class EditNextResultView extends ItemView {
   }
 
   getDisplayText() {
-    return 'EditNext Dashboard';
+    return 'Grooming the garden';
   }
 
   getIcon() {
@@ -849,16 +948,32 @@ class EditNextSettingTab extends PluginSettingTab {
     // Exclude subfolders setting
     new Setting(containerEl)
       .setName('Exclude Subfolders')
-      .setDesc('Comma-separated list of subfolders (relative to vault) to exclude')
+      .setDesc('Comma-separated list of subfolders (relative to folder specified above) to exclude')
       .addText((text) =>
         text
           .setPlaceholder('drafts/old,archive')
           .setValue(this.plugin.settings.excludeFolders.join(','))
           .onChange(async (value) => {
+            Logger.debug('Setting exclude folders:', value);
+            // Split by comma, trim whitespace, normalize paths, and filter empty strings
             this.plugin.settings.excludeFolders = value
               .split(',')
-              .map((s) => s.trim())
+              .map((s) => normalizePath(s.trim()))
               .filter((s) => s);
+            Logger.debug('Parsed exclude folders:', this.plugin.settings.excludeFolders);
+            await this.plugin.saveSettings();
+          })
+      );
+
+    // Add dashboard as home page setting
+    new Setting(containerEl)
+      .setName('Set Dashboard as Home Page')
+      .setDesc('When enabled, the EditNext dashboard will be shown when opening Obsidian')
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.dashboardAsHomePage)
+          .onChange(async (value) => {
+            this.plugin.settings.dashboardAsHomePage = value;
             await this.plugin.saveSettings();
           })
       );

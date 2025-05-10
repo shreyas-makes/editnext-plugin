@@ -222,8 +222,13 @@ def main():
     md_files: List[Path] = list(args.folder.glob("**/*.md"))
     # Exclude specified subfolders if any
     if args.exclude_folders:
-        exclude_paths = [args.folder / excl for excl in args.exclude_folders]
-        md_files = [p for p in md_files if not any(excl_path in p.parents for excl_path in exclude_paths)]
+        # Normalize exclude paths
+        exclude_paths = [Path(args.folder / excl).resolve() for excl in args.exclude_folders]
+        # Normalize and compare full paths
+        md_files = [p for p in md_files if not any(
+            str(p.resolve()).startswith(str(excl_path))
+            for excl_path in exclude_paths
+        )]
     if not md_files:
         sys.exit("No .md files found in the specified folder.")
 
