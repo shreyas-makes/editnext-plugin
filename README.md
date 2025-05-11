@@ -18,15 +18,18 @@ Transform your writing workflow by intelligently prioritizing your drafts. EditN
   - Overall editing effort (AI-generated)
   - Grammar and language errors
   - Readability and complexity
-- **Interactive Results View** with sortable columns and one-click navigation
+- **Interactive Dashboard** with sortable columns and one-click navigation
 - **Frontmatter Integration** to automatically add scores to your documents
 - **Customizable Weights** to emphasize the factors that matter most to you
+- **Folder Targeting** to analyze specific sections of your vault
+- **Exclude Folders** to skip specific subfolders from analysis
+- **Dashboard as Home Page** option to see your editing priorities on startup
 
 ## 📋 How It Works
 
 1. Select which documents to analyze (your entire vault or a specific folder)
 2. EditNext processes each document through multiple analysis engines
-3. View results in a beautiful, interactive table sorted by editing priority
+3. View results in a beautiful, interactive dashboard sorted by editing priority
 4. Click any document to open it and start editing where it matters most
 
 ## 🔧 Installation
@@ -64,8 +67,11 @@ Transform your writing workflow by intelligently prioritizing your drafts. EditN
 ### Advanced Features
 - **Custom Weights**: Adjust the importance of LLM scoring, grammar, and readability
 - **Folder Targeting**: Analyze only specific folders in your vault
+- **Exclude Subfolders**: Skip specific subfolders from analysis
 - **Frontmatter Updates**: Automatically add editing scores to your document metadata
+- **Dashboard Integration**: View and sort your documents by editing priority
 - **Manual Refresh**: Re-analyze documents after making significant edits
+- **Dashboard as Home**: Option to show the EditNext dashboard when opening Obsidian
 
 ## 📊 Results Explanation
 
@@ -84,6 +90,8 @@ EditNext provides several scores for each document:
 - **Python Script Not Found**: Make sure Python is installed and the path is correct in settings
 - **API Key Issues**: Verify your OpenAI API key is valid and has sufficient quota
 - **Missing Python Packages**: Run `pip install openai textstat language_tool_python python-dotenv tqdm rich`
+- **Dashboard Not Loading**: Try refreshing the view or restarting Obsidian
+- **Frontmatter Not Updating**: Check file permissions and vault settings
 
 Need more help? Visit our [GitHub Issues page](https://github.com/shreyas-makes/editnext-plugin/issues).
 
